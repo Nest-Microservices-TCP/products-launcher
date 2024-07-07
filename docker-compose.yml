@@ -1,0 +1,95 @@
+# A traves de este archivo docker-compose es que se va a construir toda
+# nuestra arquitectura
+services:
+
+  # Cada que se crea un servicio, el DNS interno de la red de docker
+  # lo que hace es crear un servidor con el cual se puede establecer
+  # la comunicacion, el nombre de este servidor sera exactamente
+  # igual a como lo definimos en el servicio, en este caso sera
+  # "nats-server", es por eso que lo usamos en las urls de 
+  # NATS_SERVERS, ya que ahora esta seria el nombre de la red/dns a
+  # la que se conectaran los servicios o en la que estara disponible
+  # el servidor de NATS
+  nats-server:
+    container_name: nats-server
+    image: nats:latest
+    ports:
+      - 8222:8222
+
+  client-gateway:
+  # Se especifica la ruta donde se encuentra el dockerfile que sera
+  # tomado para la construccion del container del servicio
+    container_name: client-gateway
+    build: 
+      context: ./client-gateway
+      dockerfile: dockerfile
+    image: client-gateway:latest
+    # Se especifica que puerto se va a exponer desde el container hacia
+    # nuestro equipo. Pdemos definir la data directamente o pasarla a
+    # traves de variables de entorno como en este caso
+    ports:
+      - "${CLIENT_GATEWAY_PORT}:3000"
+    # Se define un bind volume, el cual va a trackear todos los cambios
+    # de nuestra carpeta source hacia la ruta que deseemos dentro del
+    # container
+    volumes:
+      - ./client-gateway/src:/usr/src/app/src
+    # Definimos el comando que va a levantar el servicio, se va a ejecutar
+    # una vez construido el container
+    command: npm run start:dev
+    environment:
+      - PORT=3000
+      - NATS_SERVERS=nats://nats-server:4222
+
+  products-ms:
+    container_name: products-ms
+    build:
+      context: ./products-ms
+      dockerfile: dockerfile
+    image: products-ms:latest
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./products-ms/src:/usr/src/app/src
+    command: npm run start:dev
+    environment:
+      - PORT=3001
+      - DATABASE_URL=file:./dev.db
+      - NATS_SERVERS=nats://nats-server:4222
+
+  orders-ms:
+    depends_on:
+      - orders-db
+    container_name: orders-ms
+    build:
+      context: ./orders-ms
+      dockerfile: dockerfile
+    image: orders-ms:latest
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./orders-ms/src:/usr/src/app/src
+    command: npm run start:dev
+    environment:
+      - PORT=3002
+      - NATS_SERVERS=nats://nats-server:4222
+      - DATABASE_URL=postgresql://postgres:postgres@orders-db:5432/orders?schema=public
+
+  orders-db:
+    container_name: orders_database
+    image: postgres:16.2
+    volumes:
+      - ./orders-ms/postgres:/var/lib/postgresql/data
+    # Si agregamos la parte del port, esto lo que hara es exponer el puerto
+    # para poder acceder desde afuera a la base de datos. Si lo quitamos, el
+    # acceso ya no estaria disponible hacia afuera, por lo que ahora solo
+    # estaria disponible en la red interna de docker
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=orders
+
+# Para ejecutar y levantar nuestro archivo de docker-compose podemos usar
+# el comando 'docker-compose up --build'
